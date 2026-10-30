@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Potbound</title><meta name="theme-color" content="#14101c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#f4efe6;--mut:#b9b0c4;--acc:#ff8a3d;--gl:rgba(20,14,30,.7);color-scheme:dark}
+*{box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:none}
+html,body{height:100%;margin:0;background:#14101c;color:var(--ink);font:500 clamp(14px,2.3vmin,18px)/1.4 'Bricolage Grotesque',system-ui,sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+.ui{position:fixed;inset:0;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));pointer-events:none}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.chip{background:var(--gl);border:1px solid #ffffff20;border-radius:14px;padding:8px 14px;min-height:44px;display:flex;gap:14px;align-items:center;font-variant-numeric:tabular-nums;backdrop-filter:blur(6px)}
+.chip b{font-size:1.5em;font-weight:800;color:var(--acc)}
+.chip small{color:var(--mut);display:block;line-height:1.1}
+button{font:inherit;color:var(--ink);background:var(--gl);border:1px solid #ffffff30;border-radius:12px;min-height:44px;min-width:44px;padding:8px 18px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.pri{background:var(--acc);color:#1d0d00;border-color:var(--acc);font-weight:800}
+#msg{position:absolute;left:0;right:0;top:22%;text-align:center;font-size:clamp(20px,5vmin,40px);font-weight:800;letter-spacing:-.01em;padding:0 16px;opacity:0;transition:opacity .5s;text-shadow:0 2px 12px #000a}
+#msg.on{opacity:1}
+#fl{position:fixed;inset:0;background:radial-gradient(ellipse at center,#ff2a0000 35%,#ff2a00cc);opacity:0;pointer-events:none}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#14101ce8;padding:20px;pointer-events:auto}
+#ov[hidden]{display:none}
+.panel{width:min(520px,100%);display:flex;flex-direction:column;gap:14px}
+h1{margin:0;font-size:clamp(44px,13vmin,92px);line-height:.92;font-weight:800;letter-spacing:-.035em}
+p{margin:0;color:var(--mut);max-width:48ch}
+.pot{display:inline-block;width:.5em;height:.5em;background:var(--acc);border-radius:0 0 50% 50%;margin-left:.1em}
+</style></head><body>
+<canvas id="c"></canvas><div id="fl"></div>
+<div class="ui"><div class="top">
+ <div class="chip"><div><b id="h">0</b> m</div><div><small>best</small><span id="bs">0</span> m</div><div><small>falls</small><span id="fa">0</span></div></div>
+ <button id="rs" aria-label="Restart from the bottom">Restart</button></div>
+ <div id="msg"></div></div>
+<div id="ov"><div class="panel"><h1>Pot<br>bound<span class="pot"></span></h1>
+ <p id="how"></p><p>There are no checkpoints. There is no top. Every fall counts.</p>
+ <div><button class="pri" id="go">Climb</button></div></div></div>
+<script>
+(()=>{
+const $=s=>document.querySelector(s),cvs=$('#c'),ctx=cvs.getContext('2d'),touch=matchMedia('(pointer:coarse)').matches;
+$('#how').textContent=touch?'Drag your finger to aim the hammer. Plant it on a rock and push to haul yourself up.':'Move the mouse to swing the hammer. Plant it on a rock and push to haul yourself up. R restarts, Esc pauses.';
+let W,H,dpr,S,cap=Math.min(devicePixelRatio||1,2);
+function resize(){dpr=cap;W=innerWidth;H=innerHeight;cvs.width=W*dpr;cvs.height=H*dpr;S=Math.max(.34,Math.min(W/760,H/640))}
+addEventListener('resize',resize);resize();
+let sv={best:0,falls:0,worst:0};try{Object.assign(sv,JSON.parse(localStorage.getItem('potbound')||'{}'))}catch(e){}
+const store=()=>{try{localStorage.setItem('potbound',JSON.stringify(sv))}catch(e){}};
+let ac;function tone(a,b,d,v=.1,ty='sine'){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;o.type=ty;o.frequency.setValueAtTime(a,t);o.frequency.exponentialRampToValueAtTime(b,t+d);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(ac.destination);o.start(t);o.stop(t+d)}catch(e){}}
+/* palettes: earth, ice, ember, night, then the loop repeats */
+const hx=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16));
+const BI=[{t:'#2b1d3a',b:'#f0a35e',r:'#b9753f',d:'#6e3f1f',g:'#4a8a3c'},{t:'#0a2b3f',b:'#8fd6d8',r:'#6a9fb4',d:'#34607a',g:'#e8f4f8'},
+{t:'#1b0707',b:'#e2522b',r:'#8f3b2c',d:'#4a1a14',g:'#2b1210'},{t:'#090d28',b:'#5a3f94',r:'#5f6fa3',d:'#2d3668',g:'#1a1d3d'}].map(o=>{for(const k in o)o[k]=hx(o[k]);return o});
+const mix=(a,b,t)=>`rgb(${a.map((v,i)=>v+(b[i]-v)*t|0)})`;
+function pal(h){const u=Math.max(0,h)/3200,i=Math.floor(u)%4,f=u-Math.floor(u),t=Math.max(0,(f-.8)*5),A=BI[i],C=BI[(i+1)%4];return k=>mix(A[k],C[k],t)}
+/* endless terrain: chunks generated from a seed, so nothing needs storing */
+const rng=a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const CH=525,ax=n=>240*Math.sin(n*.5)+90*Math.sin(n*1.2+1),cache=new Map(),WL=520;
+function gen(i){const rd=rng(i*7919+13),a=[],anc=[];
+ for(let n=i*5-1;n<=i*5+5;n++)anc.push([ax(n),-(n*105+90),Math.max(34,60-n*.25)]);
+ for(let k=0;k<5;k++){const n=i*5+k,y=-(n*105+90),r=Math.max(34,60-n*.25),sl=rd()<Math.min(.55,n/110);
+  a.push({x:ax(n),y,r,g:sl?.03:.8,sl});a.push({x:(ax(n)+ax(n+1))/2,y:y-52,r:24,g:.8})}
+ for(let k=0;k<4;k++){const s=rd()<.5?-1:1,r=40+rd()*50,x=s*(230+rd()*200),y=-(i*CH+rd()*CH),sl=rd()<Math.min(.5,i/30);
+  if(anc.every(c=>Math.hypot(c[0]-x,c[1]-y)>r+c[2]+60))a.push({x,y,r,g:sl?.03:.8,sl})}
+ return a}
+let act=[],actI=-9;
+function refresh(){const ci=Math.max(0,Math.floor(-B.y/CH));if(ci===actI)return;actI=ci;act=[];
+ for(let i=Math.max(0,ci-1);i<=ci+2;i++){if(!cache.has(i))cache.set(i,gen(i));act.push(...cache.get(i))}
+ for(const k of cache.keys())if(Math.abs(k-ci)>5)cache.delete(k)}
+/* physics: pot body B and hammer tip T joined by a length set by the pointer */
+const BR=24,TR=7,GR=.0139,H_=1/360;
+const B={x:0,y:-BR,px:0,py:-BR},T={x:70,y:-BR,px:70,py:-BR},M={x:200,y:-BR};
+let L=100,now=0,lastHit=0,shake=0;
+function push(p,nx,ny,pen,g,isT){p.x+=nx*pen;p.y+=ny*pen;let vx=p.x-p.px,vy=p.y-p.py;const vn=vx*nx+vy*ny;if(vn<0){vx-=nx*vn;vy-=ny*vn}
+ const tx=-ny,ty=nx,vt=vx*tx+vy*ty,c=Math.sign(vt)*Math.min(Math.abs(vt),g*pen);
+ if(isT){p.x-=tx*c;p.y-=ty*c;p.px=p.x;p.py=p.y}else{vx-=tx*c;vy-=ty*c;p.px=p.x-vx;p.py=p.y-vy}
+ if(pen>2.5&&now-lastHit>90){lastHit=now;tone(isT?170:90,50,.08,.1)}}
+function hit(p,r,isT){
+ for(const c of act){const dx=p.x-c.x,dy=p.y-c.y,m=c.r+r;if(dx>m||dx<-m||dy>m||dy<-m)continue;const d2=dx*dx+dy*dy;if(d2>=m*m)continue;const d=Math.sqrt(d2)||.001;push(p,dx/d,dy/d,m-d,c.g,isT)}
+ if(p.y+r>0)push(p,0,-1,p.y+r,.9,isT);
+ if(p.x>WL-r)push(p,-1,0,p.x-WL+r,.02,isT);else if(p.x<-WL+r)push(p,1,0,-WL+r-p.x,.02,isT)}
+function sub(){
+ let vx=(B.x-B.px)*.9985,vy=(B.y-B.py)*.9985;B.px=B.x;B.py=B.y;B.x+=vx;B.y+=vy+GR;
+ const mx=M.x-B.x,my=M.y-B.y,md=Math.hypot(mx,my)||1;L=Math.max(70,Math.min(190,md));
+ T.px=T.x;T.py=T.y;const tx=B.x+mx/md*L-T.x,ty=B.y+my/md*L-T.y,td=Math.hypot(tx,ty),st=Math.min(td,6.5);
+ if(td>.001){T.x+=tx/td*st;T.y+=ty/td*st}
+ for(let k=0;k<4;k++){const ex=T.x-B.x,ey=T.y-B.y,e=Math.hypot(ex,ey)||1,df=(e-L)/e,wb=k?.5:0,wt=1,s=df/(wb+wt);
+  B.x+=ex*s*wb;B.y+=ey*s*wb;T.x-=ex*s*wt;T.y-=ey*s*wt;hit(T,TR,1);hit(B,BR,0)}
+}
+/* game state */
+let state='ready',acc=0,peak=0,fall=false,low=0,mile=0,hmax=0,falls=0,cam={x:0,y:-120},flash=0,msgT=0;
+const MSG={f:['Gravity says hello again.','That was going so well.','Bold strategy. It did not work.','The mountain thanks you for visiting.','Down is also a direction.','Breathe. Then do it again.'],
+ b:['All of that. Gone.','A new personal worst. Congratulations.','Please keep the device in one piece.','Somewhere, a rock is laughing.']};
+const pick=a=>a[Math.random()*a.length|0];
+function say(t,ms=2600){const m=$('#msg');m.textContent=t;m.classList.add('on');clearTimeout(msgT);msgT=setTimeout(()=>m.classList.remove('on'),ms)}
+function restart(){B.x=B.px=0;B.y=B.py=-BR;T.x=T.px=70;T.y=T.py=-BR;peak=B.y;fall=false;mile=0;hmax=0;actI=-9;refresh();cam.x=0;cam.y=-120}
+function start(){$('#ov').hidden=true;state='play';tone(300,600,.15,.06)}
+function pause(){if(state==='play'){state='ready';$('#go').textContent='Resume';$('#ov').hidden=false}}
+$('#go').onclick=start;$('#rs').onclick=()=>{restart();say('Back to the bottom. Hello again.')};
+addEventListener('keydown',e=>{if(e.code==='KeyR'){restart()}if(e.code==='Escape')state==='play'?pause():start()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
+addEventListener('pointermove',e=>setM(e));addEventListener('pointerdown',e=>setM(e));
+function setM(e){M.x=(e.clientX-(W/2-cam.x*S))/S;M.y=(e.clientY-(H*.6-cam.y*S))/S}
+/* drawing */
+function draw(){
+ const h=-cam.y,P=pal(h);
+ const g=ctx.createLinearGradient(0,0,0,H*dpr);g.addColorStop(0,P('t'));g.addColorStop(1,P('b'));
+ ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle=g;ctx.fillRect(0,0,cvs.width,cvs.height);
+ const sx=shake?(Math.random()-.5)*shake:0,sy=shake?(Math.random()-.5)*shake:0;
+ ctx.setTransform(dpr*S,0,0,dpr*S,dpr*(W/2-cam.x*S+sx),dpr*(H*.6-cam.y*S+sy));
+ const top=cam.y-H*.6/S-120,bot=cam.y+H*.4/S+120;
+ for(const c of act){if(c.y+c.r<top||c.y-c.r>bot)continue;const Q=pal(-c.y);
+  ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,7);ctx.fillStyle=c.sl?'#a9e4f2':Q('r');ctx.fill();
+  ctx.beginPath();ctx.arc(c.x-c.r*.18,c.y-c.r*.2,c.r*.72,0,7);ctx.fillStyle=c.sl?'#e6fbff':Q('d');ctx.globalAlpha=c.sl?.6:.35;ctx.fill();ctx.globalAlpha=1;
+  ctx.lineWidth=3;ctx.strokeStyle=c.sl?'#5fb4cc':Q('d');ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,7);ctx.stroke()}
+ if(bot>0){ctx.fillStyle=P('g');ctx.fillRect(-WL-400,0,2*WL+800,900);ctx.fillStyle=pal(0)('d');ctx.fillRect(-WL-400,0,2*WL+800,6)}
+ ctx.fillStyle='#0006';ctx.fillRect(-WL-400,top,400,bot-top);ctx.fillRect(WL,top,400,bot-top);
+ const a=Math.atan2(T.y-B.y,T.x-B.x);
+ ctx.lineCap='round';ctx.strokeStyle='#cfd3d8';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(B.x,B.y-12);ctx.lineTo(T.x,T.y);ctx.stroke();
+ ctx.save();ctx.translate(T.x,T.y);ctx.rotate(a);ctx.fillStyle='#3a3f47';ctx.fillRect(-4,-14,18,28);ctx.fillStyle='#8a929c';ctx.fillRect(-4,-14,18,5);ctx.restore();
+ ctx.fillStyle='#e8e0d0';ctx.beginPath();ctx.ellipse(B.x,B.y-16,13,19,0,0,7);ctx.fill();
+ ctx.fillStyle='#e9c9a6';ctx.beginPath();ctx.arc(B.x,B.y-40,9.5,0,7);ctx.fill();
+ ctx.fillStyle='#1d1d22';ctx.beginPath();ctx.arc(B.x+(T.x>B.x?3:-3),B.y-41,1.8,0,7);ctx.fill();
+ ctx.fillStyle='#2c3138';ctx.beginPath();ctx.arc(B.x,B.y,BR,0,Math.PI);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#59616b';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(B.x-BR,B.y);ctx.lineTo(B.x+BR,B.y);ctx.stroke();
+}
+/* loop */
+let last=performance.now(),fr=0,ft=0;
+function frame(t){requestAnimationFrame(frame);now=t;const dt=Math.min((t-last)/1000,.05);last=t;
+ if(state==='play'){acc+=dt;let n=0;while(acc>=H_&&n++<18){sub();acc-=H_}refresh();
+  const m=Math.max(0,-(B.y+BR)/60);hmax=Math.max(hmax,m);
+  if(!fall){if(B.y<peak)peak=B.y;else if(B.y-peak>350){fall=true;low=B.y;falls++;sv.falls++;flash=1;shake=14;tone(700,80,.7,.12,'sawtooth');say(pick(MSG.f))}}
+  else{low=Math.max(low,B.y);if(B.y<low-160){fall=false;const lost=(low-peak)/60;if(lost>sv.worst){sv.worst=lost;if(lost>25)say(pick(MSG.b)+' Lost '+lost.toFixed(0)+' m.',3200)}else say('Lost '+lost.toFixed(0)+' m. Again.');peak=B.y}}
+  if(m>sv.best){sv.best=m;if((sv.best|0)%5===0)store()}
+  const ms=Math.floor(m/50);if(ms>mile){mile=ms;say(ms*50+' m. Do not look down.')}
+  $('#h').textContent=m.toFixed(0);$('#bs').textContent=sv.best.toFixed(0);$('#fa').textContent=sv.falls}
+ const f=1-Math.exp(-5*dt);cam.x+=(B.x*.6-cam.x)*f;cam.y+=(B.y-cam.y)*f;
+ shake*=Math.exp(-8*dt);if(shake<.2)shake=0;flash*=Math.exp(-3*dt);$('#fl').style.opacity=flash;
+ draw();
+ fr++;ft+=dt;if(ft>2){if(fr/ft<40&&cap>1){cap=Math.max(1,cap-.5);resize()}fr=0;ft=0}}
+restart();$('#bs').textContent=sv.best.toFixed(0);$('#fa').textContent=sv.falls;requestAnimationFrame(frame);
+})();
+</script></body></html>
